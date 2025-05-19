@@ -1,6 +1,6 @@
 # ===== app.py =====
 import streamlit as st
-
+from streamlit_option_menu import option_menu
 
 # Configure page
 st.set_page_config(page_title="Customer Support NLP App", layout="wide")
@@ -102,6 +102,7 @@ elif selected == "Predict & Answer":
 
         query = st.text_area("✉️ Enter a customer query to classify and generate a response:")
         if st.button("Predict and Generate"):
+            stopwords = set(['a','an','the','and','or','is','are','was','were','in','on','at','of','to','for','it','how','can','i'])
             def clean_text(text):
                 text = re.sub(r'<.*?>', '', text)
                 text = re.sub(r'[^a-zA-Z ]', '', text)
@@ -115,13 +116,28 @@ elif selected == "Predict & Answer":
 
             @st.cache_resource
             def load_generator():
-                return pipeline("text-generation", model="distilgpt2")
+                return pipeline("text-generation", model="gpt2")
             generator = load_generator()
 
-            prompt = f"Category: {predicted_cat}\nCustomer Query: {query}\nResponse:"
-            result = generator(prompt, max_length=100, num_return_sequences=1)
+            prompt = f"""
+            You are a helpful customer support assistant.
+
+            Category: {predicted_cat}
+            Customer Query: {query}
+
+            Provide a concise, professional response:
+            """
+
+            result = generator(
+                prompt,
+                max_length=150,
+                num_return_sequences=1,
+                temperature=0.7,
+                top_k=50,
+                do_sample=True,
+            )
 
             st.success("Generated Response:")
-            st.write(result[0]['generated_text'])
+            st.write(result[0]['generated_text'].split("Response:")[-1].strip())
     else:
         st.warning("⚠️ Please upload and clean your data on the EDA page first.")
