@@ -1,158 +1,137 @@
+# main.py
 import streamlit as st
+from streamlit_option_menu import option_menu
 
-# App configuration
-st.set_page_config(page_title="Customer Support NLP App", layout="wide")
+st.set_page_config(page_title="Customer Query Classifier", layout="wide")
 
-# Home Page
-st.title("🤖 Customer Support NLP Application")
-st.markdown("""
-Welcome to the **Customer Support NLP App** – a multi-page Streamlit application designed to help analyze, classify, and generate responses for customer queries using Natural Language Processing (NLP).
+st.sidebar.title("📌 Navigation")
+page = st.sidebar.radio("Go to", ["Upload & Clean", "EDA", "Train Model", "Query & Help"])
 
----
+if page == "Upload & Clean":
+    st.title("📤 Step 1: Upload & Clean Your Data")
+    st.write("Upload a CSV file containing customer queries and their categories.")
+    uploaded_file = st.file_uploader("Choose CSV", type=["csv"])
 
-### 📋 Use this app to:
-1. **Explore and Understand Data (EDA)**
-2. **Train a Classifier to Predict Review Categories**
-3. **Get Help via AI-Powered Response Generation**
+    if uploaded_file:
+        import pandas as pd
+        df = pd.read_csv(uploaded_file)
+        st.session_state.df = df
+        st.write("Raw Data:", df.head())
 
-👉 Use the sidebar to navigate through each section.
-""")
+        # Simple Cleaning
+        df = df.dropna(subset=["message", "category"])
+        df['message'] = df['message'].str.lower().str.replace(r"[^a-z0-9 ]", "", regex=True)
 
-import streamlit as st
-import pandas as pd
-import re
+        st.session_state.cleaned_data = df
+        st.success("Cleaned and saved to session_state.cleaned_data")
 
-st.title("📊 Step 1: Data EDA (Exploratory Data Analysis)")
+elif page == "EDA":
+    import seaborn as sns
+    import matplotlib.pyplot as plt
 
-# File uploader for CSV
-uploaded_file = st.file_uploader("Upload your customer support CSV file", type="csv")
+    st.title("📊 Step 2: Exploratory Data Analysis")
 
-if uploaded_file:
-    # Load and preview data
-    data = pd.read_csv(uploaded_file)
-    st.subheader("📄 Raw Data Preview")
-    st.write(data.head())
+    if 'cleaned_data' in st.session_state:
+        df = st.session_state.cleaned_data
+        st.subheader("Class Distribution")
+        st.bar_chart(df['category'].value_counts())
 
-    # Lowercasing text columns
-    for col in ['channel', 'message', 'category']:
-        if col in data.columns:
-            data[col] = data[col].astype(str).str.lower()
+        st.subheader("Heatmap of Category vs Word Count")
+        df['length'] = df['message'].str.split().apply(len)
+        pivot = df.pivot_table(index='category', values='length', aggfunc='mean')
+        fig, ax = plt.subplots()
+        sns.heatmap(pivot, annot=True, fmt=".1f", cmap="Blues", ax=ax)
+        st.pyplot(fig)
+    else:
+        st.warning("Please upload and clean data first.")
 
-    # Remove HTML tags from message
-    def remove_html_tags(text):
-        return re.sub(r'<.*?>', '', text)
+elif page == "Train Model":
+    st.title("🤖 Step 3: Fine-tune DistilBERT for Classification")
+    import pandas as pd
+    from sklearn.preprocessing import LabelEncoder
+    from sklearn.metrics import classification_report, confusion_matrix
+    from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification, Trainer, TrainingArguments
+    from datasets import Dataset
+    import torch
 
-    data['message'] = data['message'].apply(remove_html_tags)
+    if 'cleaned_data' in st.session_state:
+        df = st.session_state.cleaned_data
+        label_enc = LabelEncoder()
+        df['label'] = label_enc.fit_transform(df['category'])
+        hf_dataset = Dataset.from_pandas(df[['message', 'label']])
 
-    # Remove basic stopwords
-    stopwords = {'a','an','the','and','or','is','are','was','were','in','on','at','of','to','for','it','how','can','i'}
-    def remove_stopwords(text):
-        words = re.findall(r'\b\w+\b', text.lower())
-        return ' '.join([w for w in words if w not in stopwords])
+        tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
 
-    data['message'] = data['message'].apply(remove_stopwords)
+        def tokenize(batch):
+            return tokenizer(batch['message'], padding=True, truncation=True)
 
-    st.subheader("🧼 Cleaned Data Preview")
-    st.write(data.head())
+        hf_dataset = hf_dataset.map(tokenize, batched=True)
+        hf_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'label'])
+        split = hf_dataset.train_test_split(test_size=0.2)
+        train_ds = split['train']
+        test_ds = split['test']
 
-    # Save cleaned data to session state
-    st.session_state.cleaned_data = data
-else:
-    st.info("📂 Please upload a CSV file to proceed.")
+        model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased", num_labels=len(label_enc.classes_))
 
-import streamlit as st
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
-from sklearn.metrics import classification_report, confusion_matrix
-import pandas as pd
+        training_args = TrainingArguments(
+            output_dir='./results',
+            evaluation_strategy="epoch",
+            save_strategy="epoch",
+            num_train_epochs=3,
+            per_device_train_batch_size=8,
+            per_device_eval_batch_size=8,
+            logging_dir='./logs'
+        )
 
-st.title("🧠 Step 2: Review Category Prediction")
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_ds,
+            eval_dataset=test_ds
+        )
 
-# Check if cleaned data is available
-if 'cleaned_data' in st.session_state:
-    data = st.session_state.cleaned_data
+        trainer.train()
 
-    # Vectorization using TF-IDF
-    vectorizer = TfidfVectorizer(max_features=5000)
-    X = vectorizer.fit_transform(data['message'])
-    y = data['category']
+        predictions = trainer.predict(test_ds)
+        preds = predictions.predictions.argmax(axis=1)
+        true_labels = predictions.label_ids
 
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+        st.subheader("Classification Report")
+        st.text(classification_report(true_labels, preds, target_names=label_enc.classes_))
+        st.subheader("Confusion Matrix")
+        st.write(confusion_matrix(true_labels, preds))
 
-    # Train Support Vector Classifier
-    model = SVC(kernel='linear', probability=True)
-    model.fit(X_train, y_train)
+        st.session_state.label_enc = label_enc
+        st.session_state.bert_model = model
+        st.session_state.tokenizer = tokenizer
+    else:
+        st.warning("Please upload and preprocess data first.")
 
-    # Make predictions
-    y_pred = model.predict(X_test)
+elif page == "Query & Help":
+    st.title("🗣️ Step 4: Query Prediction & Help Center")
 
-    # Show results
-    st.subheader("📈 Classification Report")
-    st.text(classification_report(y_test, y_pred))
+    if all(k in st.session_state for k in ['bert_model', 'tokenizer', 'label_enc']):
+        model = st.session_state.bert_model
+        tokenizer = st.session_state.tokenizer
+        label_enc = st.session_state.label_enc
 
-    st.subheader("📉 Confusion Matrix")
-    st.write(confusion_matrix(y_test, y_pred))
+        st.subheader("🔍 Predict Category for Customer Query")
+        query = st.text_area("Enter a customer query:")
+        if st.button("Classify"):
+            inputs = tokenizer(query, return_tensors="pt", truncation=True, padding=True)
+            with torch.no_grad():
+                outputs = model(**inputs)
+                logits = outputs.logits
+                predicted = torch.argmax(logits, dim=1).item()
+                label = label_enc.inverse_transform([predicted])[0]
+            st.success(f"Predicted Category: **{label}**")
 
-    # Store model and vectorizer for use in generation page
-    st.session_state.model = model
-    st.session_state.vectorizer = vectorizer
-
-    st.success("✅ Model trained successfully!")
-else:
-    st.warning("⚠️ Please complete Step 1 (EDA) before training the model.")
-
-import streamlit as st
-import re
-from transformers import pipeline
-
-st.title("🆘 Step 3: AI Help & Response Generator")
-
-# Check for trained model and vectorizer
-if 'model' in st.session_state and 'vectorizer' in st.session_state:
-    model = st.session_state.model
-    vectorizer = st.session_state.vectorizer
-
-    # Load text generator only once (cached)
-    @st.cache_resource
-    def load_generator():
-        return pipeline("text-generation", model="distilgpt2")
-
-    generator = load_generator()
-
-    # User input for query
-    query = st.text_area("💬 Enter a customer query for help:", height=150)
-
-    if st.button("🧠 Predict Category & Generate AI Response"):
-        if query.strip():
-            # Clean the input query
-            def remove_html_tags(text):
-                return re.sub(r'<.*?>', '', text)
-
-            stopwords = {'a','an','the','and','or','is','are','was','were','in','on','at','of','to','for','it','how','can','i'}
-            def remove_stopwords(text):
-                words = re.findall(r'\b\w+\b', text.lower())
-                return ' '.join([w for w in words if w not in stopwords])
-
-            cleaned_query = remove_stopwords(remove_html_tags(query))
-
-            # Transform and predict
-            vec_query = vectorizer.transform([cleaned_query])
-            predicted_category = model.predict(vec_query)[0]
-
-            st.subheader("📌 Predicted Category")
-            st.info(predicted_category)
-
-            # Prompt for generator
-            prompt = f"Category: {predicted_category}\nCustomer Query: {query}\nResponse:"
-            response = generator(prompt, max_length=100, num_return_sequences=1)
-
-            st.subheader("💡 AI Generated Response")
-            st.success(response[0]['generated_text'])
-        else:
-            st.warning("❗Please enter a query to get a response.")
-else:
-    st.warning("⚠️ Model not found. Please train the model first (Step 2).")
+        st.subheader("💬 Help Center")
+        st.markdown("""
+        - **Having Trouble?** Make sure you've trained the model first.
+        - **Want Better Accuracy?** Try cleaning data and increasing training epochs.
+        - **Data Format Issue?** Input CSV must contain `message` and `category` columns.
+        - **Need Help?** Contact your dev team or refer to [HuggingFace Docs](https://huggingface.co/docs).
+        """)
+    else:
+        st.warning("Please complete training before classifying queries.")
