@@ -1,247 +1,242 @@
 import streamlit as st
 import pandas as pd
 import re
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
 from transformers import pipeline
+import plotly.express as px
 import time
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
 
-# Set up the page with improved layout and styling
-st.set_page_config(
-    page_title="Customer Support AI Assistant", 
-    layout="wide",
-    page_icon="🤖"
-)
-
-# Custom CSS for better styling
+# Set up the page
+st.set_page_config(page_title="AI Customer Support Assistant", layout="wide", page_icon="🤖")
+st.title("🤖 AI Customer Support Assistant")
 st.markdown("""
     <style>
-    .main {
-        background-color: #f5f5f5;
-    }
-    .stTextInput>div>div>input, .stTextArea>div>div>textarea {
-        background-color: #ffffff;
-    }
-    .stButton>button {
-        background-color: #4CAF50;
-        color: white;
-        border-radius: 5px;
-        padding: 10px 24px;
-    }
-    .stButton>button:hover {
-        background-color: #45a049;
-    }
-    .sidebar .sidebar-content {
-        background-color: #e8f4f8;
-    }
-    .report {
-        padding: 15px;
-        background-color: white;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
+    .main {background-color: #f5f5f5;}
+    .stTextArea textarea {font-size: 16px;}
+    .stButton button {width: 100%; background-color: #4CAF50; color: white;}
+    .stButton button:hover {background-color: #45a049;}
+    .stAlert {border-left: 5px solid #4CAF50;}
     </style>
     """, unsafe_allow_html=True)
 
-# App title and description
-st.title("🤖 Customer Support AI Assistant")
-st.markdown("""
-    This application helps classify customer support queries and generate responses using AI.
-    Upload your dataset to train the classifier or use the chatbot for immediate assistance.
-    """)
-
-# Sidebar for navigation and info
+# Sidebar for navigation
 with st.sidebar:
-    st.header("About")
-    st.markdown("""
-    **Features:**
-    - CSV data upload & preprocessing
-    - Query classification (SVM model)
-    - AI response generation
-    - Interactive chatbot
-    """)
-    
+    st.image("https://cdn-icons-png.flaticon.com/512/1570/1570887.png", width=100)
+    st.title("Navigation")
+    app_mode = st.radio("Choose a mode:", 
+                       ["Data Analysis", "Model Training", "Live Prediction", "Response Generation"])
     st.markdown("---")
-    st.markdown("""
-    **Instructions:**
-    1. Upload your customer support dataset (CSV)
-    2. View cleaned data and model metrics
-    3. Use the chatbot for real-time queries
-    """)
-
-# Main content area
-tab1, tab2, tab3 = st.tabs(["📊 Data Analysis", "🔍 Query Classifier", "💬 AI Chatbot"])
-
-with tab1:
-    st.header("Data Processing & Model Training")
+    st.markdown("### About")
+    st.markdown("This app uses NLP to classify customer queries and generate responses.")
     
-    # File uploader
-    uploaded_file = st.file_uploader("Upload Customer Support CSV", type="csv", 
-                                   help="Should contain 'message' and 'category' columns")
+# File uploader
+uploaded_file = st.file_uploader("📤 Upload your customer support dataset (CSV)", type="csv")
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
     
-    if uploaded_file:
-        with st.spinner("Processing data..."):
-            df = pd.read_csv(uploaded_file)
-            
-            # Show raw data with expander
-            with st.expander("View Raw Data", expanded=True):
-                st.dataframe(df.head())
-            
-            # Data cleaning
-            st.subheader("Data Cleaning")
-            
-            # Convert text columns to lowercase
-            df['channel'] = df['channel'].astype(str).str.lower()
-            df['message'] = df['message'].astype(str).str.lower()
-            df['category'] = df['category'].astype(str).str.lower()
-
-            # Function to remove HTML tags
-            def remove_html_tags(text):
-                return re.sub(r'<.*?>', '', text)
-
-            # Function to remove stopwords
-            stopwords = ['a','an','the','and','or','is','are','was','were','in','on','at','of','to','for','it','how','can','i']
-            def remove_stopwords(text):
-                words = re.findall(r'\b\w+\b', text.lower())
-                return ' '.join([w for w in words if w not in stopwords])
-
-            # Apply cleaning functions
-            df['message'] = df['message'].apply(remove_html_tags)
-            df['message'] = df['message'].apply(remove_stopwords)
-
-            with st.expander("View Cleaned Data"):
-                st.dataframe(df.head())
-            
-            # Model training
-            st.subheader("Model Training")
-            
-            # TF-IDF vectorization
-            vectorizer = TfidfVectorizer(max_features=5000)
-            X = vectorizer.fit_transform(df['message'])
-            y = df['category']
-
-            # Train-test split
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
-
-            # Train an SVM classifier
-            model = SVC(kernel='linear', probability=True)
-            model.fit(X_train, y_train)
-
-            # Evaluate the model
-            y_pred = model.predict(X_test)
-            
-            with st.expander("Model Performance Metrics"):
-                st.markdown("**Classification Report**")
-                st.code(classification_report(y_test, y_pred))
-                
-                st.markdown("**Confusion Matrix**")
-                st.dataframe(pd.DataFrame(confusion_matrix(y_test, y_pred)))
-            
-            st.success("Model training completed successfully!")
-
-with tab2:
-    st.header("Query Classification")
+    # Data cleaning functions
+    def clean_text(text):
+        text = str(text).lower()
+        text = re.sub(r'<.*?>', '', text)  # Remove HTML tags
+        text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)  # Remove URLs
+        text = re.sub(r'\@\w+|\#', '', text)  # Remove mentions and hashtags
+        text = re.sub(r'[^\w\s]', '', text)  # Remove punctuation
+        return text
     
-    if 'model' not in st.session_state or 'vectorizer' not in st.session_state:
-        st.warning("Please upload and process data in the 'Data Analysis' tab first.")
-    else:
-        query = st.text_area("Enter customer query:", 
-                            placeholder="Type your customer support query here...",
-                            height=150)
+    # Apply cleaning
+    df['cleaned_message'] = df['message'].apply(clean_text)
+    
+    if app_mode == "Data Analysis":
+        st.header("📊 Data Analysis")
         
-        col1, col2 = st.columns([1, 3])
+        col1, col2 = st.columns(2)
+        
         with col1:
+            st.subheader("Dataset Overview")
+            st.dataframe(df.head())
+            st.metric("Total Samples", len(df))
+            
+            # Basic stats
+            st.subheader("Basic Statistics")
+            st.write(f"Number of unique categories: {df['category'].nunique()}")
+            st.write(f"Number of unique channels: {df['channel'].nunique()}")
+            
+        with col2:
+            st.subheader("Category Distribution")
+            fig = px.pie(df, names='category', title='Query Categories')
+            st.plotly_chart(fig, use_container_width=True)
+            
+        # Word cloud
+        st.subheader("Word Cloud of Customer Queries")
+        text = " ".join(review for review in df.cleaned_message)
+        wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.imshow(wordcloud, interpolation='bilinear')
+        ax.axis("off")
+        st.pyplot(fig)
+        
+        # Channel analysis
+        st.subheader("Channel Analysis")
+        channel_counts = df['channel'].value_counts().reset_index()
+        channel_counts.columns = ['Channel', 'Count']
+        fig = px.bar(channel_counts, x='Channel', y='Count', color='Channel')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    elif app_mode == "Model Training":
+        st.header("🤖 Model Training")
+        
+        # Encode labels
+        le = LabelEncoder()
+        df['category_encoded'] = le.fit_transform(df['category'])
+        
+        # TF-IDF vectorization
+        vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
+        X = vectorizer.fit_transform(df['cleaned_message'])
+        y = df['category_encoded']
+        
+        # Train-test split
+        test_size = st.slider("Select test set size", 0.1, 0.5, 0.2, 0.05)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, stratify=y, random_state=42)
+        
+        # Model training
+        st.subheader("Train Classification Model")
+        if st.button("Train Model"):
+            with st.spinner("Training in progress..."):
+                start_time = time.time()
+                
+                model = SVC(kernel='linear', probability=True)
+                model.fit(X_train, y_train)
+                
+                training_time = time.time() - start_time
+                
+                # Evaluate
+                y_pred = model.predict(X_test)
+                accuracy = np.mean(y_pred == y_test)
+                
+                st.success(f"Model trained successfully in {training_time:.2f} seconds!")
+                st.metric("Accuracy", f"{accuracy*100:.2f}%")
+                
+                # Classification report
+                st.subheader("Classification Report")
+                report = classification_report(y_test, y_pred, target_names=le.classes_, output_dict=True)
+                st.dataframe(pd.DataFrame(report).transpose())
+                
+                # Confusion matrix
+                st.subheader("Confusion Matrix")
+                cm = confusion_matrix(y_test, y_pred)
+                fig = px.imshow(cm, 
+                               labels=dict(x="Predicted", y="Actual", color="Count"),
+                               x=le.classes_, 
+                               y=le.classes_,
+                               text_auto=True)
+                st.plotly_chart(fig, use_container_width=True)
+    
+    elif app_mode == "Live Prediction":
+        st.header("🔍 Live Query Classification")
+        
+        if 'model' not in st.session_state:
+            st.warning("Please train the model first in the 'Model Training' section.")
+        else:
+            query = st.text_area("Enter a customer query:", 
+                               placeholder="Type your customer support query here...",
+                               height=150)
+            
             if st.button("Classify Query"):
                 if query.strip():
-                    with st.spinner("Analyzing query..."):
-                        # Clean query
-                        cleaned_query = remove_html_tags(query)
-                        cleaned_query = remove_stopwords(cleaned_query)
-                        X_query = st.session_state.vectorizer.transform([cleaned_query])
-
-                        # Predict category
-                        predicted_category = st.session_state.model.predict(X_query)[0]
+                    # Clean and vectorize query
+                    cleaned_query = clean_text(query)
+                    X_query = st.session_state.vectorizer.transform([cleaned_query])
+                    
+                    # Predict
+                    predicted_num = st.session_state.model.predict(X_query)[0]
+                    predicted_category = st.session_state.le.inverse_transform([predicted_num])[0]
+                    probabilities = st.session_state.model.predict_proba(X_query)[0]
+                    
+                    # Display results
+                    st.subheader("Classification Results")
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.metric("Predicted Category", predicted_category)
                         
-                        st.markdown(f"""
-                        <div class="report">
-                            <h4>Classification Result</h4>
-                            <p><strong>Query:</strong> {query[:100]}...</p>
-                            <p><strong>Predicted Category:</strong> <span style="color: #4CAF50; font-weight: bold;">{predicted_category}</span></p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    with col2:
+                        max_prob = np.max(probabilities) * 100
+                        st.metric("Confidence", f"{max_prob:.1f}%")
+                    
+                    # Show probabilities
+                    st.subheader("Category Probabilities")
+                    prob_df = pd.DataFrame({
+                        'Category': st.session_state.le.classes_,
+                        'Probability': probabilities
+                    }).sort_values('Probability', ascending=False)
+                    
+                    fig = px.bar(prob_df, x='Probability', y='Category', orientation='h')
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Show similar past queries
+                    st.subheader("Similar Past Queries")
+                    similar_queries = df[df['category'] == predicted_category].sample(3)
+                    for i, row in similar_queries.iterrows():
+                        st.markdown(f"**{row['category']}**: {row['message']}")
                 else:
-                    st.warning("Please enter a query first.")
+                    st.warning("Please enter a query to classify.")
+    
+    elif app_mode == "Response Generation":
+        st.header("💬 AI Response Generator")
         
+        # Load text generation model
+        @st.cache_resource
+        def load_generator():
+            return pipeline("text-generation", model="gpt2")
+        
+        generator = load_generator()
+        
+        query = st.text_area("Enter customer query for response generation:",
+                            placeholder="The product I received is damaged...",
+                            height=150)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            max_length = st.slider("Response length", 50, 300, 150)
         with col2:
-            if st.button("Generate Response"):
-                if query.strip():
-                    with st.spinner("Generating response..."):
-                        # Load text generation model
-                        @st.cache_resource
-                        def load_generator():
-                            return pipeline("text-generation", model="distilgpt2")
-                        generator = load_generator()
-                        
-                        # Generate response
-                        prompt = f"Customer query: {query}. Response:"
-                        response = generator(prompt, max_length=100, num_return_sequences=1)
-                        
-                        st.markdown(f"""
-                        <div class="report">
-                            <h4>AI Generated Response</h4>
-                            <p>{response[0]['generated_text']}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.warning("Please enter a query first.")
-
-with tab3:
-    st.header("AI Support Chatbot")
-    st.markdown("""
-    Chat with our AI assistant for immediate customer support.
-    The bot can answer questions based on your uploaded data or general knowledge.
-    """)
-    
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    
-    # Display chat messages from history on app rerun
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # Accept user input
-    if prompt := st.chat_input("How can I help you today?"):
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        # Display user message in chat message container
-        with st.chat_message("user"):
-            st.markdown(prompt)
+            temperature = st.slider("Creativity", 0.1, 1.0, 0.7, 0.1)
         
-        # Display assistant response in chat message container
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
-            
-            # Simulate stream of response with milliseconds delay
-            # In a real app, you would replace this with Bard API call
-            assistant_response = f"I'm your AI assistant. You asked: '{prompt}'. I would normally consult the Bard API for a detailed response to this query."
-            
-            for chunk in assistant_response.split():
-                full_response += chunk + " "
-                time.sleep(0.05)
-                # Add a blinking cursor to simulate typing
-                message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
-        
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
-
-# Store model and vectorizer in session state for tab access
-if uploaded_file and 'model' not in st.session_state:
-    st.session_state.model = model
-    st.session_state.vectorizer = vectorizer
-    
+        if st.button("Generate Response"):
+            if query.strip():
+                with st.spinner("Generating response..."):
+                    prompt = f"Customer support query: {query}\n\nAI response:"
+                    response = generator(
+                        prompt,
+                        max_length=max_length,
+                        num_return_sequences=1,
+                        temperature=temperature,
+                        do_sample=True
+                    )
+                    
+                    generated_text = response[0]['generated_text']
+                    # Extract just the response part
+                    ai_response = generated_text.split("AI response:")[1].strip()
+                    
+                    st.subheader("Generated Response")
+                    st.success(ai_response)
+                    
+                    # Feedback mechanism
+                    st.subheader("Feedback")
+                    feedback = st.radio("Was this response helpful?", 
+                                      ("👍 Yes", "👎 No"), 
+                                      horizontal=True)
+                    if feedback:
+                        st.write("Thank you for your feedback!")
+            else:
+                st.warning("Please enter a query to generate a response.")
+else:
+    st.info("👈 Please upload a CSV file to begin. The file should contain 'message' and 'category' columns.")
