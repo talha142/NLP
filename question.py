@@ -1,5 +1,5 @@
 import streamlit as st
-from backend import *  # Your existing backend functions
+
 
 st.set_page_config(page_title="Customer Support Assistant", layout="wide")
 
