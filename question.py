@@ -1,105 +1,37 @@
+# welcome.py
+
 import streamlit as st
 
+# Set Streamlit page configuration
+st.set_page_config(page_title="Welcome | Query Classifier", layout="wide")
 
-st.set_page_config(page_title="Customer Support Assistant", layout="wide")
+# Title and introduction
+st.title("🧠 Smart Query Classifier & Responder")
 
-def welcome_page():
-    st.title("Customer Support Assistant")
-    st.write("""
-    This application helps categorize customer queries and generate responses.
-    Features:
-    - Upload your customer support data
-    - Explore data through EDA
-    - Train a classification model
-    - Predict query categories
-    - Generate automated responses
-    """)
+# Welcome Message
+st.markdown("""
+### 👋 Welcome to the Smart Query Classifier & Responder App
 
+This application helps you to:
 
-def eda_section():
-    st.header("Data Exploration")
-    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
-    
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            if df.empty:
-                st.warning("The uploaded file is empty.")
-                return
-            
-            cleaned_df = clean_dataframe(df)
-            
-            # Store dataframe in session state for later use
-            st.session_state.df = cleaned_df
-            
-            st.subheader("Cleaned Data Preview")
-            st.dataframe(cleaned_df.head())
-            
-            # Add visualizations
-            st.subheader("Category Distribution")
-            st.bar_chart(cleaned_df['category'].value_counts())
-            
-        except Exception as e:
-            st.error(f"Error reading file: {str(e)}")
-    else:
-        st.info("Please upload a CSV file to begin analysis")
+- 📂 Upload a dataset containing customer messages.
+- 📊 Explore the data through visualizations.
+- 🧠 Train a machine learning model (SVM) to classify message categories.
+- 🔍 Predict the category of new queries.
+- 🤖 Generate automated responses using a transformer-based model.
 
-def model_training_section(df):
-    st.header("Model Training")
-    
-    if st.button("Train Model"):
-        with st.spinner("Training in progress..."):
-            model, vectorizer, report, matrix = train_model(df)
-            
-            st.subheader("Model Performance")
-            st.text(report)
-            
-            # Store model in session state
-            st.session_state['model'] = model
-            st.session_state['vectorizer'] = vectorizer
+### 🚀 How to Use:
+1. Navigate to **Upload File** to provide your dataset.
+2. Go to **EDA** to visually analyze your data.
+3. Proceed to **Model Training** to build your text classification model.
+4. Try **Query Classification** to classify a new message.
+5. Use **Generate Response** to get a smart AI-based reply.
 
-def prediction_section():
-    st.header("Query Prediction")
-    
-    query = st.text_area("Enter your customer query:")
-    
-    if st.button("Predict and Generate Response"):
-        if 'model' not in st.session_state:
-            st.warning("Please train the model first")
-        else:
-            # Predict category
-            category = predict_category(
-                query,
-                st.session_state['model'],
-                st.session_state['vectorizer']
-            )
-            st.success(f"Predicted Category: {category}")
-            
-            # Generate response
-            generator = load_generator()
-            response = generate_response(query, generator)
-            st.subheader("Generated Response")
-            st.write(response.split("Response:")[1].strip())
+### 🛠 Built With:
+- Streamlit
+- Scikit-learn
+- Hugging Face Transformers
+- Pandas & Plotly
 
-def main():
-    pages = {
-        "Welcome": welcome_page,
-        "EDA": eda_section,
-        "Model Training": model_training_section,
-        "Prediction": prediction_section
-    }
-    
-    st.sidebar.title("Navigation")
-    selection = st.sidebar.radio("Go to", list(pages.keys()))
-    
-    # Execute selected page function
-    if selection == "Model Training":
-        if 'df' in st.session_state:
-            pages[selection](st.session_state.df)
-        else:
-            st.warning("Please upload data first from EDA section")
-    else:
-        pages[selection]()
-
-if __name__ == "__main__":
-    main()
+Start by selecting an option from the sidebar!
+""")
