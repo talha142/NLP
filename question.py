@@ -20,16 +20,29 @@ def eda_section():
     st.header("Data Exploration")
     uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
     
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file)
-        cleaned_df = clean_dataframe(df)
-        
-        st.subheader("Cleaned Data Preview")
-        st.dataframe(cleaned_df.head())
-        
-        # Add visualizations
-        st.subheader("Category Distribution")
-        st.bar_chart(cleaned_df['category'].value_counts())
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            if df.empty:
+                st.warning("The uploaded file is empty.")
+                return
+            
+            cleaned_df = clean_dataframe(df)
+            
+            # Store dataframe in session state for later use
+            st.session_state.df = cleaned_df
+            
+            st.subheader("Cleaned Data Preview")
+            st.dataframe(cleaned_df.head())
+            
+            # Add visualizations
+            st.subheader("Category Distribution")
+            st.bar_chart(cleaned_df['category'].value_counts())
+            
+        except Exception as e:
+            st.error(f"Error reading file: {str(e)}")
+    else:
+        st.info("Please upload a CSV file to begin analysis")
 
 def model_training_section(df):
     st.header("Model Training")
